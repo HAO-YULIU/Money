@@ -7,3 +7,4 @@ afterEach(() => {
   localStorage.clear();
   window.location.hash = '';
 });
+window.scrollTo = () => {};
