@@ -54,7 +54,13 @@ export default function ExpenseForm({ group, expense, onSave, onDelete }: Props)
 
   const submit = (ev: React.FormEvent) => {
     ev.preventDefault();
-    const r = validateExpense(d);
+    let draft = d;
+    if (isRepayment && expense.split.mode === 'custom') {
+      const receiverId = Object.keys(expense.split.amounts)[0];
+      if (receiverId === d.payerId) return setError('還款人和收款人不能是同一人');
+      draft = { ...d, mode: 'custom', customAmounts: { [receiverId]: d.amount } };
+    }
+    const r = validateExpense(draft);
     if (!r.ok) return setError(r.error);
     const e: Expense = {
       id: expense?.id ?? newId(),
