@@ -1,0 +1,237 @@
+# 分帳工具 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 純瀏覽器的多人分帳網頁（群組、記帳、餘額、結算、網址快照分享、JSON 備份），部署到 GitHub Pages。
+
+**Architecture:** 純前端 SPA。`src/domain/` 放無副作用的計算（分攤、餘額、結算），`src/storage/` 負責 localStorage，`src/share/` 負責網址編碼與 JSON 備份，`src/ui/` 是 React 畫面，用 `#` 路由。所有金額以整數新台幣處理。
+
+**Tech Stack:** Vite 5、React 18、TypeScript 5、Vitest + @testing-library/react + jsdom、lz-string、GitHub Actions（actions/deploy-pages）。
+
+**Spec:** `docs/superpowers/specs/2026-11-18-split-expenses-design.md`
+
+## Global Constraints
+
+- 介面文字一律繁體中文，版面以手機直式（寬 360px 起）為主。
+- 金額只接受正整數新台幣；畫面顯示格式 `$1,234`。
+- 不使用任何後端或雲端服務；資料只存在 `localStorage`。
+- Vite `base` 必須為 `/Money/`（網址 `https://hao-yuliu.github.io/Money/`）。
+- 路由只用 `#`（`#/`、`#/group/<id>`、`#/group/<id>/expense/new`、`#/group/<id>/expense/<expenseId>`、`#/share/<data>`）。
+- 任何時刻：每筆帳目分攤總和＝帳目金額；群組所有人餘額加總＝0。
+- 平分規則：付款人以外的參與者每人 `Math.ceil(金額 / 參與人數)`；付款人分攤＝`金額 − 其他參與者分攤總和`（付款人不是參與者時同樣計算，分攤可為負）。
+- 帳目明細每人顯示 `−分攤`；分攤為負者顯示 `+` 並標註「進位多收」。
+- 餘額＝已付總額 − 分攤總額；正數「應收」、負數「應付」。
+
+## Review Focus
+
+1. **localStorage 不可用或已滿**（無痕模式、配額）：不得白畫面；顯示「無法儲存，請先匯出備份」提示，程式仍可操作。→ Task 3 測試 `save returns false when setItem throws`。
+2. **壞掉或被截斷的分享連結**：顯示「連結無效或不完整」頁面而非當機。→ Task 4 測試 `decodeGroup returns null for garbage`。
+3. **金額輸入 0、負數、小數、空白、非數字**：不能儲存並顯示提示。→ Task 6 測試 `rejects invalid amounts`。
+4. **刪除已有帳目（含還款紀錄）的成員**：必須擋下並說明原因。→ Task 5 測試 `canRemoveMember is false when member appears in any expense`。
+5. **匯入的群組 id 已存在**：詢問覆蓋或另存一份（另存時產生新 id、名稱加「（副本）」）。→ Task 4 測試 `importGroup as copy assigns new id and suffix`。
+
+---
+
+### Task 1: 專案骨架與部署流程
+
+**Files:**
+- Create: `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`, `src/main.tsx`, `src/ui/App.tsx`, `src/test/setup.ts`, `.gitignore`, `.github/workflows/deploy.yml`, `README.md`
+- Test: `src/ui/App.test.tsx`
+
+**Interfaces:**
+- Produces: npm scripts `dev`, `build`, `test`（`vitest run`）；`App` 元件（之後的 Task 擴充路由）。
+
+- [ ] **Step 1:** 建立 Vite React TS 專案檔案；`vite.config.ts` 設 `base: '/Money/'`，並設定 `test: { environment: 'jsdom', setupFiles: 'src/test/setup.ts' }`；安裝 `react react-dom lz-string` 與 dev 依賴 `vite @vitejs/plugin-react typescript vitest jsdom @testing-library/react @testing-library/jest-dom @types/react @types/react-dom`。
+- [ ] **Step 2:** 寫測試 `renders app title`：render `<App />` 後 `getByText('分帳')` 存在。
+- [ ] **Step 3:** 執行 `npm test`，預期 FAIL（App 尚未有標題）。
+- [ ] **Step 4:** `App` 顯示標題「分帳」。
+- [ ] **Step 5:** 執行 `npm test` 預期 PASS；`npm run build` 預期產生 `dist/index.html`，其中資源路徑以 `/Money/` 開頭。
+- [ ] **Step 6:** 新增 `.github/workflows/deploy.yml`：觸發 `push` 到 `main` 與 `workflow_dispatch`；permissions `contents: read, pages: write, id-token: write`；步驟 `actions/checkout@v4` → `actions/setup-node@v4`（node 20, cache npm）→ `npm ci` → `npm test` → `npm run build` → `actions/upload-pages-artifact@v3`（path `dist`）→ deploy job 用 `actions/deploy-pages@v4`。
+- [ ] **Step 7:** `README.md` 寫：本機開發指令、部署前需在 GitHub repo Settings → Pages → Source 選「GitHub Actions」。
+- [ ] **Step 8:** Commit `chore: scaffold vite react app and pages deploy`。
+
+### Task 2: 資料型別與計算核心
+
+**Files:**
+- Create: `src/domain/types.ts`, `src/domain/split.ts`, `src/domain/balance.ts`, `src/domain/settle.ts`, `src/domain/money.ts`
+- Test: `src/domain/split.test.ts`, `src/domain/balance.test.ts`, `src/domain/settle.test.ts`, `src/domain/money.test.ts`
+
+**Interfaces:**
+- Produces:
+```ts
+// types.ts
+export type Member = { id: string; name: string };
+export type Split =
+  | { mode: 'equal'; participantIds: string[] }
+  | { mode: 'custom'; amounts: Record<string, number> };
+export type Expense = {
+  id: string; title: string; amount: number; payerId: string;
+  date: string;            // 'YYYY-MM-DD'
+  split: Split;
+  kind: 'expense' | 'repayment';
+};
+export type Group = { id: string; name: string; members: Member[]; expenses: Expense[]; createdAt: string; updatedAt: string };
+export type Transfer = { fromId: string; toId: string; amount: number };
+// split.ts
+export function computeShares(e: Expense): Record<string, number>;   // 只含分攤 ≠ 0 或為參與者的成員
+export function detailLines(e: Expense): { memberId: string; value: number; roundingBonus: boolean }[]; // value = −share
+// balance.ts
+export function computeBalances(g: Group): Record<string, number>;   // 每位成員都有 key
+// settle.ts
+export function suggestTransfers(balances: Record<string, number>): Transfer[];
+// money.ts
+export function formatTWD(n: number): string;  // 1234 → '$1,234'；-34 → '−$34'
+export function parseAmount(input: string): number | null; // 正整數才回傳，否則 null
+```
+- 還款紀錄表示法：`kind: 'repayment'`、`payerId` = 還款人、`split: { mode: 'custom', amounts: { [收款人]: 金額 } }`。
+
+- [ ] **Step 1: 寫失敗測試**（`split.test.ts`）
+```ts
+const eq = (amount: number, payerId: string, ids: string[]) =>
+  ({ id: 'e', title: 't', amount, payerId, date: '2026-11-18', kind: 'expense', split: { mode: 'equal', participantIds: ids } } as Expense);
+expect(computeShares(eq(100, 'A', ['A','B','C']))).toEqual({ A: 32, B: 34, C: 34 });
+expect(computeShares(eq(100, 'A', ['B','C','D']))).toEqual({ A: -2, B: 34, C: 34, D: 34 });
+expect(computeShares(eq(90,  'A', ['B','C','D']))).toEqual({ B: 30, C: 30, D: 30 });
+expect(computeShares(eq(99,  'A', ['A','B','C']))).toEqual({ A: 33, B: 33, C: 33 });
+expect(computeShares(eq(1,   'A', ['A','B','C']))).toEqual({ A: -1, B: 1, C: 1 });
+expect(computeShares(eq(100, 'A', ['A']))).toEqual({ A: 100 });
+// custom
+expect(computeShares({ ...eq(100,'A',[]), split: { mode: 'custom', amounts: { A: 20, B: 80 } } })).toEqual({ A: 20, B: 80 });
+// detailLines
+expect(detailLines(eq(100, 'A', ['B','C','D']))).toContainEqual({ memberId: 'A', value: 2, roundingBonus: true });
+expect(detailLines(eq(100, 'A', ['A','B','C']))).toContainEqual({ memberId: 'A', value: -32, roundingBonus: false });
+```
+- [ ] **Step 2: 寫失敗測試**（`balance.test.ts`、`settle.test.ts`、`money.test.ts`）
+  - `computeBalances` 只有「A 幫 B、C、D 代墊 100」→ `{ A: 102, B: -34, C: -34, D: -34 }`；沒有帳目的成員為 `0`。
+  - 加上還款紀錄（B 還 A 34）→ `B: 0, A: 68`。
+  - 屬性測試：隨機 50 組群組（成員 2–6 人、帳目 1–20 筆、金額 1–10000），餘額加總恆為 0、每筆分攤總和恆等於金額。
+  - `suggestTransfers({ A: 102, B: -34, C: -34, D: -34 })` → 3 筆，皆 `toId: 'A'`, `amount: 34`。
+  - `suggestTransfers({ A: 0, B: 0 })` → `[]`。
+  - 執行轉帳後餘額全部歸零（隨機群組驗證）。
+  - `formatTWD(1234)` → `'$1,234'`；`formatTWD(-34)` → `'−$34'`。
+  - `parseAmount`：`'100'`→100；`'0'`、`'-5'`、`'1.5'`、`''`、`'abc'` → `null`。
+- [ ] **Step 3:** `npm test`，預期 FAIL。
+- [ ] **Step 4:** 實作上列函式。`suggestTransfers` 演算法：把餘額分成債務人（負）與債權人（正），每回合取欠最多與應收最多的兩人，轉 `min(|欠|, 應收)`，更新後重複，直到全部為 0。
+- [ ] **Step 5:** `npm test`，預期 PASS。
+- [ ] **Step 6:** Commit `feat: add split, balance and settlement logic`。
+
+### Task 3: 本機儲存
+
+**Files:**
+- Create: `src/storage/store.ts`, `src/storage/useAppData.ts`
+- Test: `src/storage/store.test.ts`
+
+**Interfaces:**
+- Consumes: `Group`（Task 2）
+- Produces:
+```ts
+export type AppData = { version: 1; groups: Group[] };
+export const STORAGE_KEY = 'money-split-v1';
+export function load(): AppData;            // 讀不到、壞掉、版本不符 → { version: 1, groups: [] }；壞掉時先把原字串備份到 'money-split-v1-corrupt'
+export function save(d: AppData): boolean;  // setItem 拋例外時回傳 false
+export function newId(): string;            // crypto.randomUUID()
+export function useAppData(): {
+  data: AppData; saveOk: boolean;
+  upsertGroup(g: Group): void; deleteGroup(id: string): void;
+};
+```
+
+- [ ] **Step 1:** 寫測試：`load returns empty when nothing stored`、`save then load roundtrip`、`load backs up corrupt JSON and returns empty`、`save returns false when setItem throws`（用 `vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })`）、`load returns empty when localStorage getter throws`。
+- [ ] **Step 2:** `npm test`，預期 FAIL。
+- [ ] **Step 3:** 實作；所有 localStorage 存取包在 try/catch。`upsertGroup` 會更新 `updatedAt`。
+- [ ] **Step 4:** `npm test`，預期 PASS。
+- [ ] **Step 5:** Commit `feat: add localStorage persistence`。
+
+### Task 4: 網址分享與 JSON 備份
+
+**Files:**
+- Create: `src/share/codec.ts`, `src/share/backup.ts`
+- Test: `src/share/codec.test.ts`, `src/share/backup.test.ts`
+
+**Interfaces:**
+- Consumes: `Group`, `AppData`, `newId`
+- Produces:
+```ts
+export function encodeGroup(g: Group): string;          // LZString.compressToEncodedURIComponent(JSON.stringify(g))
+export function decodeGroup(s: string): Group | null;   // 解壓失敗或欄位不符 → null
+export function shareUrl(g: Group): string;             // `${location.origin}${import.meta.env.BASE_URL}#/share/${encodeGroup(g)}`
+export function isValidGroup(x: unknown): x is Group;   // 檢查必要欄位、型別、成員 id 參照
+export function exportJson(d: AppData): string;
+export function parseBackup(text: string): AppData | null;
+export function importGroup(d: AppData, g: Group, mode: 'overwrite' | 'copy'): AppData;
+```
+
+- [ ] **Step 1:** 寫測試：`encode/decode roundtrip`；`decodeGroup returns null for garbage`（`'xyz'`、`''`、截掉後半的字串）；`isValidGroup rejects expense referencing unknown member`；`importGroup overwrite replaces same id`；`importGroup as copy assigns new id and suffix`（名稱變成 `原名（副本）`，id 不同）；`parseBackup returns null for wrong version`。
+- [ ] **Step 2:** `npm test`，預期 FAIL。
+- [ ] **Step 3:** 實作。
+- [ ] **Step 4:** `npm test`，預期 PASS。
+- [ ] **Step 5:** Commit `feat: add share link codec and json backup`。
+
+### Task 5: 群組列表與群組設定畫面
+
+**Files:**
+- Create: `src/ui/router.ts`, `src/ui/GroupListPage.tsx`, `src/ui/GroupSettings.tsx`, `src/ui/styles.css`, `src/domain/members.ts`
+- Modify: `src/ui/App.tsx`
+- Test: `src/ui/GroupListPage.test.tsx`, `src/domain/members.test.ts`
+
+**Interfaces:**
+- Consumes: `useAppData`, `Group`, `newId`
+- Produces:
+```ts
+// router.ts
+export type Route =
+  | { name: 'home' } | { name: 'group'; groupId: string }
+  | { name: 'expenseNew'; groupId: string } | { name: 'expenseEdit'; groupId: string; expenseId: string }
+  | { name: 'share'; data: string } | { name: 'notFound' };
+export function parseHash(hash: string): Route;
+export function useRoute(): Route;      // 監聽 hashchange
+export function go(hash: string): void;
+// members.ts
+export function canRemoveMember(g: Group, memberId: string): boolean; // 出現在任何帳目（付款人或分攤）就 false
+```
+
+- [ ] **Step 1:** 寫測試：`parseHash('#/group/abc')` → `{ name: 'group', groupId: 'abc' }`（其他路由各一條、未知 → `notFound`）；`canRemoveMember is false when member appears in any expense`（含還款紀錄）；`GroupListPage` 測試：無群組時顯示「還沒有群組」，輸入名稱「日本旅遊」與成員「小明、小華」後按「建立」，列表出現「日本旅遊」。
+- [ ] **Step 2:** `npm test`，預期 FAIL。
+- [ ] **Step 3:** 實作：首頁列出群組（名稱、成員數、最後更新日）、「新增群組」表單（名稱必填、成員至少 2 位、名字不可重複）、「匯出備份」/「匯入備份」按鈕（用 Task 4）。`GroupSettings` 可改群組名、新增成員、改名成員、刪除成員（`canRemoveMember` 為 false 時按鈕停用並顯示「已有帳目，無法刪除」）、刪除群組（需確認）。`saveOk` 為 false 時頂部顯示「無法儲存，請先匯出備份」。
+- [ ] **Step 4:** `npm test`，預期 PASS；`npm run dev` 手動在 360px 寬確認版面。
+- [ ] **Step 5:** Commit `feat: add group list and settings`。
+
+### Task 6: 群組頁（帳目、餘額、結算）與記帳表單
+
+**Files:**
+- Create: `src/ui/GroupPage.tsx`, `src/ui/ExpenseList.tsx`, `src/ui/BalanceView.tsx`, `src/ui/SettleView.tsx`, `src/ui/ExpenseForm.tsx`, `src/ui/validateExpense.ts`
+- Modify: `src/ui/App.tsx`
+- Test: `src/ui/validateExpense.test.ts`, `src/ui/GroupPage.test.tsx`
+
+**Interfaces:**
+- Consumes: `computeShares`, `detailLines`, `computeBalances`, `suggestTransfers`, `formatTWD`, `parseAmount`, `useAppData`, `go`
+- Produces:
+```ts
+export type ExpenseDraft = { title: string; amount: string; payerId: string; date: string; mode: 'equal' | 'custom'; participantIds: string[]; customAmounts: Record<string, string> };
+export function validateExpense(d: ExpenseDraft): { ok: true; amount: number; split: Split } | { ok: false; error: string };
+// GroupPage 接受 props { group: Group; readOnly: boolean; onChange?(g: Group): void }（Task 7 重用）
+```
+
+- [ ] **Step 1:** 寫測試 `rejects invalid amounts`：金額 `'0'`、`'-1'`、`'1.5'`、`''` → `ok: false`，錯誤「請輸入正整數金額」；項目名稱空白 → 「請輸入項目名稱」；平分沒選人 → 「請至少選一位分攤成員」；各自金額總和 ≠ 金額 → 「分攤總和 $X 與金額 $Y 不符」；各自金額有非整數 → 「請輸入正整數金額」。
+- [ ] **Step 2:** 寫測試 `GroupPage`：給一個含「A 幫 B、C、D 代墊 100」的群組 → 帳目分頁顯示 `A +$2` 與「進位多收」、`B −$34`；餘額分頁顯示 `A` 應收 `$102`；結算分頁顯示 3 筆「B → A $34」等；按其中一筆「標記已還款」後該筆消失且 `onChange` 收到多一筆 `kind: 'repayment'` 的帳目；`readOnly` 時看不到「新增」「編輯」「標記已還款」。
+- [ ] **Step 3:** `npm test`，預期 FAIL。
+- [ ] **Step 4:** 實作：群組頁有三個分頁「帳目／餘額／結算」與右上「分享」「設定」按鈕。帳目列表依日期新到舊，每筆可展開看明細（`detailLines`），還款紀錄以「B 還款給 A $34」樣式顯示。表單預設：日期今天、付款人為第一位成員、平分且全員勾選；可編輯與刪除（需確認）。
+- [ ] **Step 5:** `npm test`，預期 PASS。
+- [ ] **Step 6:** Commit `feat: add group page, expense form, balances and settlement`。
+
+### Task 7: 分享連結與唯讀畫面
+
+**Files:**
+- Create: `src/ui/SharePage.tsx`, `src/ui/ShareButton.tsx`
+- Modify: `src/ui/App.tsx`, `src/ui/GroupPage.tsx`
+- Test: `src/ui/SharePage.test.tsx`
+
+**Interfaces:**
+- Consumes: `encodeGroup`, `decodeGroup`, `shareUrl`, `importGroup`, `GroupPage`（`readOnly`）
+
+- [ ] **Step 1:** 寫測試：有效資料 → 顯示群組名與「這是唯讀快照」提示及「存到我的瀏覽器」；無效資料 → 顯示「連結無效或不完整」與「回首頁」；本機已有同 id 群組時按「存到我的瀏覽器」→ 出現「覆蓋」「另存一份」兩個選項，選「另存一份」後首頁多一個「（副本）」群組。
+- [ ] **Step 2:** `npm test`，預期 FAIL。
+- [ ] **Step 3:** 實作 `ShareButton`：產生 `shareUrl`，用 `navigator.share`（有的話）或複製到剪貼簿並顯示「已複製連結」；網址超過 8000 字元時另外提示「帳目較多，連結可能在部分 App 被截斷，建議改用匯出備份」。
+- [ ] **Step 4:** `npm test`，預期 PASS。
+- [ ] **Step 5:** `npm run build && npx vite preview --base /Money/`，用 Playwright（行動裝置尺寸）走一遍：建立群組 → 記兩筆帳 → 看結算 → 分享 → 在新分頁開分享連結確認唯讀畫面，截圖存到 scratchpad 供檢查。
+- [ ] **Step 6:** Commit `feat: add share link and read-only view`。
