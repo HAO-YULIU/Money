@@ -3,6 +3,8 @@ import { useRoute } from './router';
 import GroupListPage from './GroupListPage';
 import GroupSettings from './GroupSettings';
 import GroupPage from './GroupPage';
+import ExpenseForm from './ExpenseForm';
+import { go } from './router';
 
 export default function App() {
   const route = useRoute();
@@ -19,6 +21,14 @@ export default function App() {
     body = <GroupPage group={group} readOnly={false} onChange={store.upsertGroup} />;
   } else if (route.name === 'groupSettings' && group) {
     body = <GroupSettings group={group} onChange={store.upsertGroup} onDelete={store.deleteGroup} />;
+  } else if (route.name === 'expenseNew' && group) {
+    body = <ExpenseForm key="new" group={group} onSave={(g) => { store.upsertGroup(g); go(`#/group/${g.id}`); }} onDelete={() => {}} />;
+  } else if (route.name === 'expenseEdit' && group) {
+    const expense = group.expenses.find((e) => e.id === route.expenseId);
+    const done = (g: typeof group) => { store.upsertGroup(g); go(`#/group/${g.id}`); };
+    body = expense
+      ? <ExpenseForm key={expense.id} group={group} expense={expense} onSave={done} onDelete={done} />
+      : <NotFound text="找不到這筆帳目" />;
   } else {
     body = <NotFound text="找不到這個頁面" />;
   }
