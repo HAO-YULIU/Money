@@ -5,6 +5,8 @@ import GroupSettings from './GroupSettings';
 import GroupPage from './GroupPage';
 import ExpenseForm from './ExpenseForm';
 import { go } from './router';
+import SharePage from './SharePage';
+import ShareButton from './ShareButton';
 
 export default function App() {
   const route = useRoute();
@@ -13,12 +15,14 @@ export default function App() {
   const group = groupId ? store.data.groups.find((g) => g.id === groupId) : undefined;
 
   let body: JSX.Element;
-  if (route.name === 'home') {
+  if (route.name === 'share') {
+    body = <SharePage data={route.data} store={store} />;
+  } else if (route.name === 'home') {
     body = <GroupListPage store={store} />;
   } else if (groupId && !group) {
     body = <NotFound text="找不到這個群組" />;
   } else if (route.name === 'group' && group) {
-    body = <GroupPage group={group} readOnly={false} onChange={store.upsertGroup} />;
+    body = <GroupPage group={group} readOnly={false} onChange={store.upsertGroup} actions={<ShareButton group={group} />} />;
   } else if (route.name === 'groupSettings' && group) {
     body = <GroupSettings group={group} onChange={store.upsertGroup} onDelete={store.deleteGroup} />;
   } else if (route.name === 'expenseNew' && group) {
