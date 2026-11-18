@@ -10,23 +10,20 @@ const dinner: Expense = {
 };
 const g = { ...group(['A', 'B', 'C', 'D'], [dinner]), name: '旅行' };
 
-test('expense detail shows payer bonus and others negative', async () => {
-  const user = userEvent.setup();
+test('每筆帳目直接顯示應收應付（不用點開）', () => {
   render(<GroupPage group={g} readOnly={false} onChange={vi.fn()} />);
-  await user.click(screen.getByText('晚餐'));
-  const detail = screen.getByTestId('detail-e1');
-  expect(within(detail).getByText('+$2')).toBeInTheDocument();
-  expect(within(detail).getByText(/進位多收/)).toBeInTheDocument();
-  expect(within(detail).getAllByText('−$34')).toHaveLength(3);
+  const card = screen.getByTestId('expense-e1');
+  expect(within(card).getByText('應收 $102')).toBeInTheDocument();
+  expect(within(card).getByText('（含進位多收 $2）')).toBeInTheDocument();
+  expect(within(card).getAllByText('應付 $34')).toHaveLength(3);
 });
 
-test('balances tab', async () => {
-  const user = userEvent.setup();
+test('最上方顯示總計', () => {
   render(<GroupPage group={g} readOnly={false} onChange={vi.fn()} />);
-  await user.click(screen.getByRole('tab', { name: '餘額' }));
-  const row = screen.getByTestId('balance-A');
-  expect(within(row).getByText('應收')).toBeInTheDocument();
-  expect(within(row).getByText('$102')).toBeInTheDocument();
+  const summary = screen.getByTestId('summary');
+  expect(within(screen.getByTestId('balance-A')).getByText('應收 $102')).toBeInTheDocument();
+  expect(within(screen.getByTestId('balance-B')).getByText('應付 $34')).toBeInTheDocument();
+  expect(summary).toHaveTextContent('目前總計');
 });
 
 test('settle tab: mark repaid adds repayment', async () => {
@@ -49,7 +46,6 @@ test('read-only hides editing controls', async () => {
   render(<GroupPage group={g} readOnly />);
   expect(screen.queryByText('＋ 記一筆')).not.toBeInTheDocument();
   expect(screen.queryByText('設定')).not.toBeInTheDocument();
-  await user.click(screen.getByText('晚餐'));
   expect(screen.queryByText('編輯')).not.toBeInTheDocument();
   await user.click(screen.getByRole('tab', { name: '結算' }));
   expect(screen.queryByRole('button', { name: '標記已還款' })).not.toBeInTheDocument();

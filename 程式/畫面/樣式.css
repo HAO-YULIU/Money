@@ -93,14 +93,12 @@ input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; accent-col
 .member-row .hint { grid-column: 1 / -1; }
 
 /* group page */
-.tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--line); border-radius: 10px; padding: 3px; margin: 8px 0 12px; }
+.tabs { display: grid; grid-template-columns: repeat(2, 1fr); background: var(--line); border-radius: 10px; padding: 3px; margin: 8px 0 12px; }
 .tabs button { font: inherit; font-size: 15px; border: none; background: transparent; color: var(--muted); padding: 8px; border-radius: 8px; cursor: pointer; }
 .tabs button[aria-selected="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-.expense { cursor: pointer; }
 .expense-head { display: flex; justify-content: space-between; gap: 8px; }
 .expense-title { font-weight: 600; }
 .expense-amount { font-weight: 600; font-variant-numeric: tabular-nums; }
-.expense-detail { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; font-size: 14px; }
 .line { display: flex; justify-content: space-between; padding: 2px 0; font-variant-numeric: tabular-nums; }
 .money { font-variant-numeric: tabular-nums; font-weight: 600; }
 .date-label { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
@@ -119,3 +117,7 @@ input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; accent-col
   box-shadow: 0 6px 24px rgba(0,0,0,.2); z-index: 10; font-size: 14px;
 }
 .toast input { color: var(--text); }
+.summary { margin-bottom: 4px; }
+.summary-title { font-weight: 600; margin-bottom: 4px; }
+.expense-detail { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 8px; font-size: 15px; }
+.edit-link { margin-left: 6px; text-decoration: none; }

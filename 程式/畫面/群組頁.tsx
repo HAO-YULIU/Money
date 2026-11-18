@@ -2,14 +2,13 @@ import { useState } from 'react';
 import { computeBalances } from '../計算/餘額';
 import { formatTWD } from '../計算/金額';
 import { suggestTransfers } from '../計算/結算';
-import { detailLines } from '../計算/分攤';
+import { expenseLines, type ExpenseLine } from '../計算/分攤';
 import type { Expense, Group } from '../計算/資料型別';
 import { newId } from '../儲存/本機儲存';
 
 type Props = { group: Group; readOnly: boolean; onChange?: (g: Group) => void; actions?: React.ReactNode };
-type Tab = 'expenses' | 'balances' | 'settle';
+type Tab = 'expenses' | 'settle';
 
-const signed = (v: number) => (v > 0 ? '+' : '') + formatTWD(v);
 
 export default function GroupPage({ group, readOnly, onChange, actions }: Props) {
   const [tab, setTab] = useState<Tab>('expenses');
@@ -26,13 +25,17 @@ export default function GroupPage({ group, readOnly, onChange, actions }: Props)
       </div>
 
       <div className="tabs" role="tablist">
-        {([['expenses', '帳目'], ['balances', '餘額'], ['settle', '結算']] as const).map(([k, label]) => (
+        {([['expenses', '帳目'], ['settle', '結算']] as const).map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>
         ))}
       </div>
 
-      {tab === 'expenses' && <ExpenseList group={group} readOnly={readOnly} name={name} />}
-      {tab === 'balances' && <BalanceView group={group} name={name} />}
+      {tab === 'expenses' && (
+        <>
+          <BalanceView group={group} name={name} />
+          <ExpenseList group={group} readOnly={readOnly} name={name} />
+        </>
+      )}
       {tab === 'settle' && <SettleView group={group} readOnly={readOnly} onChange={onChange} name={name} />}
 
       {!readOnly && tab === 'expenses' && (
@@ -47,7 +50,6 @@ export default function GroupPage({ group, readOnly, onChange, actions }: Props)
 type NameFn = (id: string) => string;
 
 function ExpenseList({ group, readOnly, name }: { group: Group; readOnly: boolean; name: NameFn }) {
-  const [open, setOpen] = useState<string | null>(null);
   if (group.expenses.length === 0) {
     return <div className="empty"><p>還沒有帳目</p>{!readOnly && <p className="muted">按下方「記一筆」開始。</p>}</div>;
   }
@@ -64,28 +66,8 @@ function ExpenseList({ group, readOnly, name }: { group: Group; readOnly: boolea
           <div className="date-label">{date}</div>
           <ul className="list">
             {sorted.filter((e) => e.date === date).map((e) => (
-              <li key={e.id} className="card expense" onClick={() => setOpen(open === e.id ? null : e.id)}>
-                <ExpenseItem e={e} name={name} />
-                {open === e.id && (
-                  <div className="expense-detail" data-testid={`detail-${e.id}`} onClick={(ev) => ev.stopPropagation()}>
-                    {e.kind === 'expense' && (
-                      <>
-                        <div className="line muted"><span>{name(e.payerId)} 付 {formatTWD(e.amount)}</span></div>
-                        {detailLines(e).map((l) => (
-                          <div key={l.memberId} className="line">
-                            <span>{name(l.memberId)}{l.roundingBonus && <span className="muted small">（進位多收）</span>}</span>
-                            <span className={l.value > 0 ? 'pos' : l.value < 0 ? 'neg' : ''}>{signed(l.value)}</span>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                    {!readOnly && (
-                      <div className="row end" style={{ marginTop: 8 }}>
-                        <a className="btn small" href={`#/group/${group.id}/expense/${e.id}`}>編輯</a>
-                      </div>
-                    )}
-                  </div>
-                )}
+              <li key={e.id} className="card" data-testid={`expense-${e.id}`}>
+                <ExpenseItem e={e} name={name} editHref={readOnly ? undefined : `#/group/${group.id}/expense/${e.id}`} />
               </li>
             ))}
           </ul>
@@ -95,12 +77,28 @@ function ExpenseList({ group, readOnly, name }: { group: Group; readOnly: boolea
   );
 }
 
-function ExpenseItem({ e, name }: { e: Expense; name: NameFn }) {
+function LineView({ l, name }: { l: ExpenseLine; name: NameFn }) {
+  const label =
+    l.kind === 'pay' ? `應付 ${formatTWD(l.amount)}` : l.kind === 'self' ? `自付 ${formatTWD(l.amount)}` : `應收 ${formatTWD(l.amount)}`;
+  const note =
+    l.kind === 'receive' && l.note
+      ? l.note.type === 'own' ? `（自己負擔 ${formatTWD(l.note.amount)}）` : `（含進位多收 ${formatTWD(l.note.amount)}）`
+      : '';
+  return (
+    <div className="line">
+      <span>{name(l.memberId)}{note && <span className="muted small">{note}</span>}</span>
+      <span className={`money ${l.kind === 'receive' ? 'pos' : l.kind === 'pay' ? 'neg' : 'muted'}`}>{label}</span>
+    </div>
+  );
+}
+
+function ExpenseItem({ e, name, editHref }: { e: Expense; name: NameFn; editHref?: string }) {
+  const edit = editHref && <a className="edit-link small" href={editHref}>編輯</a>;
   if (e.kind === 'repayment') {
     const to = Object.keys(e.split.mode === 'custom' ? e.split.amounts : {})[0];
     return (
       <div className="expense-head">
-        <span>✓ {name(e.payerId)} 還款給 {name(to)}</span>
+        <span>✓ {name(e.payerId)} 還款給 {name(to)} {edit}</span>
         <span className="expense-amount muted">{formatTWD(e.amount)}</span>
       </div>
     );
@@ -112,29 +110,33 @@ function ExpenseItem({ e, name }: { e: Expense; name: NameFn }) {
         <span className="expense-amount">{formatTWD(e.amount)}</span>
       </div>
       <div className="muted small">
-        {name(e.payerId)} 付款 · {e.split.mode === 'equal' ? `${e.split.participantIds.length} 人平分` : '各自金額'}
+        {name(e.payerId)} 付款 · {e.split.mode === 'equal' ? `${e.split.participantIds.length} 人平分` : '各自金額'} {edit}
+      </div>
+      <div className="expense-detail">
+        {expenseLines(e).map((l) => <LineView key={l.memberId} l={l} name={name} />)}
       </div>
     </>
   );
 }
 
 function BalanceView({ group, name }: { group: Group; name: NameFn }) {
+  if (group.expenses.length === 0) return null;
   const b = computeBalances(group);
   return (
-    <ul className="card list-plain">
+    <div className="card summary" data-testid="summary">
+      <div className="summary-title">目前總計</div>
       {group.members.map((m) => {
         const v = b[m.id] ?? 0;
         return (
-          <li key={m.id} className="line" data-testid={`balance-${m.id}`}>
+          <div key={m.id} className="line" data-testid={`balance-${m.id}`}>
             <span>{name(m.id)}</span>
-            <span>
-              <span className="muted small">{v > 0 ? '應收' : v < 0 ? '應付' : '已結清'}</span>{' '}
-              <span className={`money ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}`}>{formatTWD(Math.abs(v))}</span>
+            <span className={`money ${v > 0 ? 'pos' : v < 0 ? 'neg' : 'muted'}`}>
+              {v > 0 ? `應收 ${formatTWD(v)}` : v < 0 ? `應付 ${formatTWD(-v)}` : '已結清'}
             </span>
-          </li>
+          </div>
         );
       })}
-    </ul>
+    </div>
   );
 }
 

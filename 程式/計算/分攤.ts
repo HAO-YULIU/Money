@@ -25,13 +25,30 @@ export function computeShares(e: Expense): Record<string, number> {
   return out;
 }
 
-export type DetailLine = { memberId: string; value: number; roundingBonus: boolean };
+export type ExpenseLine =
+  | { memberId: string; kind: 'pay'; amount: number }
+  | { memberId: string; kind: 'self'; amount: number }
+  | { memberId: string; kind: 'receive'; amount: number; note?: { type: 'own' | 'bonus'; amount: number } };
 
-/** Per-member effect of one expense for display: −share; a negative share shows as a + rounding bonus. */
-export function detailLines(e: Expense): DetailLine[] {
-  return Object.entries(computeShares(e)).map(([memberId, share]) => ({
-    memberId,
-    value: share === 0 ? 0 : -share,
-    roundingBonus: share < 0,
-  }));
+/**
+ * What each person pays or receives because of one expense.
+ * Payer first: receives (amount − own share); the note says how much they bore themselves,
+ * or how much rounding bonus is included. Others: pay their share.
+ */
+export function expenseLines(e: Expense): ExpenseLine[] {
+  const shares = computeShares(e);
+  const own = shares[e.payerId] ?? 0;
+  const receive = e.amount - own;
+  const payer: ExpenseLine =
+    receive === 0
+      ? { memberId: e.payerId, kind: 'self', amount: e.amount }
+      : own > 0
+        ? { memberId: e.payerId, kind: 'receive', amount: receive, note: { type: 'own', amount: own } }
+        : own < 0
+          ? { memberId: e.payerId, kind: 'receive', amount: receive, note: { type: 'bonus', amount: -own } }
+          : { memberId: e.payerId, kind: 'receive', amount: receive };
+  const others: ExpenseLine[] = Object.entries(shares)
+    .filter(([id, v]) => id !== e.payerId && v !== 0)
+    .map(([memberId, amount]) => ({ memberId, kind: 'pay', amount }));
+  return [payer, ...others];
 }

@@ -1,4 +1,4 @@
-import { computeShares, detailLines } from './分攤';
+import { computeShares, expenseLines } from './分攤';
 import { eq, randomGroup } from './測試工具';
 
 test('equal split: non-payers round up, payer takes the rest', () => {
@@ -21,12 +21,6 @@ test('custom split returns the given amounts', () => {
     .toEqual({ A: 20, B: 80 });
 });
 
-test('detailLines shows -share, payer bonus as positive', () => {
-  expect(detailLines(eq(100, 'A', ['B', 'C', 'D']))).toContainEqual({ memberId: 'A', value: 2, roundingBonus: true });
-  expect(detailLines(eq(100, 'A', ['B', 'C', 'D']))).toContainEqual({ memberId: 'B', value: -34, roundingBonus: false });
-  expect(detailLines(eq(100, 'A', ['A', 'B', 'C']))).toContainEqual({ memberId: 'A', value: -32, roundingBonus: false });
-});
-
 test('property: shares always sum to amount', () => {
   for (let seed = 1; seed <= 50; seed++) {
     for (const e of randomGroup(seed).expenses) {
@@ -34,4 +28,27 @@ test('property: shares always sum to amount', () => {
       expect(sum).toBe(e.amount);
     }
   }
+});
+
+describe('expenseLines: 每人應收／應付', () => {
+  test('付款人也有分攤：應收＝別人分攤總和，括號寫自己負擔', () => {
+    expect(expenseLines(eq(100, 'A', ['A', 'B', 'C']))).toEqual([
+      { memberId: 'A', kind: 'receive', amount: 68, note: { type: 'own', amount: 32 } },
+      { memberId: 'B', kind: 'pay', amount: 34 },
+      { memberId: 'C', kind: 'pay', amount: 34 },
+    ]);
+  });
+  test('代墊且進位多收：應收含進位', () => {
+    expect(expenseLines(eq(100, 'A', ['B', 'C', 'D']))[0])
+      .toEqual({ memberId: 'A', kind: 'receive', amount: 102, note: { type: 'bonus', amount: 2 } });
+  });
+  test('代墊剛好整除：沒有括號', () => {
+    expect(expenseLines(eq(90, 'A', ['B', 'C', 'D']))[0]).toEqual({ memberId: 'A', kind: 'receive', amount: 90 });
+  });
+  test('只有付款人自己：自付', () => {
+    expect(expenseLines(eq(100, 'A', ['A']))).toEqual([{ memberId: 'A', kind: 'self', amount: 100 }]);
+  });
+  test('付款人排第一，其他人照成員順序', () => {
+    expect(expenseLines(eq(100, 'C', ['A', 'B', 'C'])).map((l) => l.memberId)).toEqual(['C', 'A', 'B']);
+  });
 });
