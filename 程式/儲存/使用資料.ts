@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Group } from '../計算/資料型別';
-import { load, readLatest, save, STORAGE_KEY, type AppData } from './本機儲存';
+import { canSave, load, readLatest, save, STORAGE_KEY, type AppData } from './本機儲存';
 
 export function useAppData() {
   const [data, setData] = useState<AppData>(() => load());
-  const [saveOk, setSaveOk] = useState(true);
+  const [saveOk, setSaveOk] = useState(() => canSave());
 
   // Another tab changed the data: reload.
   useEffect(() => {

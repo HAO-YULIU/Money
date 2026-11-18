@@ -25,7 +25,7 @@ export function validateExpense(
   let sum = 0;
   for (const [id, raw] of Object.entries(d.customAmounts)) {
     const t = raw.trim();
-    if (t === '' || t === '0') continue;
+    if (t === '' || /^0+$/.test(t)) continue;
     const v = parseAmount(t);
     if (v === null) return { ok: false, error: '請輸入正整數金額' };
     amounts[id] = v;

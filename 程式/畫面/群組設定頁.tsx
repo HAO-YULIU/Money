@@ -24,11 +24,20 @@ export default function GroupSettings({ group, onChange, onDelete }: Props) {
     setNewName('');
   };
 
-  const renameMember = (id: string, n: string) => {
+  const renameMember = (id: string, n: string): boolean => {
     const t = n.trim();
-    if (!t || nameTaken(t, id)) return setError('成員名稱不可空白或重複');
+    if (!t || nameTaken(t, id)) {
+      setError('成員名稱不可空白或重複');
+      return false;
+    }
     setError('');
     onChange({ ...group, members: group.members.map((m) => (m.id === id ? { ...m, name: t } : m)) });
+    return true;
+  };
+
+  const saveName = () => {
+    const t = name.trim();
+    if (t && t !== group.name) onChange({ ...group, name: t });
   };
 
   return (
@@ -36,16 +45,12 @@ export default function GroupSettings({ group, onChange, onDelete }: Props) {
       <a className="back" href={`#/group/${group.id}`}>‹ 返回</a>
       <h1>群組設定</h1>
 
-      <div className="card form">
+      <form className="card form" onSubmit={(e) => { e.preventDefault(); saveName(); }}>
         <label>
           群組名稱
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => name.trim() && name.trim() !== group.name && onChange({ ...group, name: name.trim() })}
-          />
+          <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} enterKeyHint="done" />
         </label>
-      </div>
+      </form>
 
       <h2>成員</h2>
       <ul className="card list-plain">
@@ -57,7 +62,9 @@ export default function GroupSettings({ group, onChange, onDelete }: Props) {
               <input
                 aria-label={`成員 ${m.name}`}
                 defaultValue={m.name}
-                onBlur={(e) => e.target.value.trim() !== m.name && renameMember(m.id, e.target.value)}
+                onBlur={(e) => {
+                  if (e.target.value.trim() !== m.name && !renameMember(m.id, e.target.value)) e.target.value = m.name;
+                }}
               />
               <button
                 className="btn ghost danger small"
@@ -67,7 +74,11 @@ export default function GroupSettings({ group, onChange, onDelete }: Props) {
               >
                 刪除
               </button>
-              {hasExpenses && <span className="muted small hint">已有帳目，無法刪除</span>}
+              {hasExpenses ? (
+                <span className="muted small hint">已有帳目，無法刪除</span>
+              ) : group.members.length <= 2 ? (
+                <span className="muted small hint">群組至少要 2 人</span>
+              ) : null}
             </li>
           );
         })}

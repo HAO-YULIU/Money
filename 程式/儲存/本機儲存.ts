@@ -47,7 +47,22 @@ export function save(d: AppData): boolean {
   }
 }
 
+const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** Short random id (10 chars, ~51 bits) — keeps share links short. */
 export function newId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const bytes = new Uint8Array(10);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => ID_CHARS[b % ID_CHARS.length]).join('');
+}
+
+/** Whether the browser lets us write to localStorage right now. */
+export function canSave(): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY + '-probe', '1');
+    localStorage.removeItem(STORAGE_KEY + '-probe');
+    return true;
+  } catch {
+    return false;
+  }
 }
