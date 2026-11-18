@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { parseNames } from '../domain/members';
 import type { Group } from '../domain/types';
-import { exportJson, parseBackup } from '../share/backup';
+import { exportJson, mergeBackup, parseBackup } from '../share/backup';
+import { downloadText } from './download';
 import { newId } from '../storage/store';
 import type { useAppData } from '../storage/useAppData';
 import { go } from './router';
@@ -14,20 +15,19 @@ export default function GroupListPage({ store }: { store: Store }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const groups = [...store.data.groups].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  const doExport = () => {
-    const blob = new Blob([exportJson(store.data)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `分帳備份-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+  const doExport = () =>
+    downloadText(`分帳備份-${new Date().toISOString().slice(0, 10)}.json`, exportJson(store.data));
 
   const doImport = async (file: File) => {
     const d = parseBackup(await file.text());
     if (!d) return setMessage('這不是有效的備份檔');
-    if (store.data.groups.length && !confirm('匯入會取代目前所有群組，確定嗎？')) return;
-    store.replaceAll(d);
+    const ids = new Set(store.data.groups.map((g) => g.id));
+    const conflicts = d.groups.filter((g) => ids.has(g.id)).length;
+    const mode =
+      conflicts && confirm(`備份裡有 ${conflicts} 個群組你已經有了。\n按「確定」用備份覆蓋，按「取消」另存一份。`)
+        ? 'overwrite'
+        : 'copy';
+    store.update((cur) => mergeBackup(cur, d, mode));
     setMessage(`已匯入 ${d.groups.length} 個群組`);
   };
 
@@ -87,7 +87,7 @@ export default function GroupListPage({ store }: { store: Store }) {
         />
       </div>
       {message && <p className="muted center">{message}</p>}
-      <p className="muted small center">資料只存在這個瀏覽器，換手機或清除瀏覽資料前請先匯出備份。</p>
+      <p className="muted small center">資料只存在這個瀏覽器。換手機、清除瀏覽資料，或 iPhone Safari 太久沒打開，都可能讓資料消失，記得定期匯出備份。</p>
     </section>
   );
 }

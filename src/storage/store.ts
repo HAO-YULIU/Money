@@ -1,4 +1,5 @@
 import type { Group } from '../domain/types';
+import { isValidGroup } from '../share/codec';
 
 export type AppData = { version: 1; groups: Group[] };
 export const STORAGE_KEY = 'money-split-v1';
@@ -15,7 +16,7 @@ export function load(): AppData {
   if (!raw) return empty();
   try {
     const d = JSON.parse(raw);
-    if (d && d.version === 1 && Array.isArray(d.groups)) return d as AppData;
+    if (d && d.version === 1 && Array.isArray(d.groups)) return { version: 1, groups: d.groups.filter(isValidGroup) };
     return empty();
   } catch {
     try {
@@ -25,6 +26,16 @@ export function load(): AppData {
     }
     return empty();
   }
+}
+
+/** Latest stored data, or null if storage cannot be read. */
+export function readLatest(): AppData | null {
+  try {
+    localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  return load();
 }
 
 export function save(d: AppData): boolean {

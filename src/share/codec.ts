@@ -9,19 +9,24 @@ export function isValidGroup(x: unknown): x is Group {
   if (!x || typeof x !== 'object') return false;
   const g = x as Record<string, unknown>;
   if (!isStr(g.id) || !isStr(g.name) || !Array.isArray(g.members) || !Array.isArray(g.expenses)) return false;
+  if (!isStr(g.createdAt) || !isStr(g.updatedAt)) return false;
   const ids = new Set<string>();
   for (const m of g.members) {
-    if (!m || !isStr(m.id) || !isStr(m.name)) return false;
+    if (!m || !isStr(m.id) || !isStr(m.name) || ids.has(m.id)) return false;
     ids.add(m.id);
   }
+  const expenseIds = new Set<string>();
   for (const e of g.expenses) {
     if (!e || !isStr(e.id) || !isStr(e.title) || !isPosInt(e.amount) || !isStr(e.date)) return false;
+    if (expenseIds.has(e.id)) return false;
+    expenseIds.add(e.id);
     if (e.kind !== 'expense' && e.kind !== 'repayment') return false;
     if (!ids.has(e.payerId)) return false;
     const s = e.split;
     if (s?.mode === 'equal') {
       if (!Array.isArray(s.participantIds) || s.participantIds.length === 0) return false;
       if (!s.participantIds.every((id: unknown) => isStr(id) && ids.has(id))) return false;
+      if (new Set(s.participantIds).size !== s.participantIds.length) return false;
     } else if (s?.mode === 'custom') {
       if (!s.amounts || typeof s.amounts !== 'object') return false;
       let sum = 0;

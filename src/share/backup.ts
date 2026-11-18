@@ -16,6 +16,16 @@ export function parseBackup(text: string): AppData | null {
   }
 }
 
+/** Add backup groups to current data; groups with an existing id are overwritten or kept as a copy. */
+export function mergeBackup(current: AppData, incoming: AppData, onConflict: 'overwrite' | 'copy'): AppData {
+  let out = current;
+  for (const g of incoming.groups) {
+    const exists = out.groups.some((x) => x.id === g.id);
+    out = importGroup(out, g, exists ? onConflict : 'overwrite');
+  }
+  return out;
+}
+
 export function importGroup(d: AppData, g: Group, mode: 'overwrite' | 'copy'): AppData {
   if (mode === 'copy') {
     return { ...d, groups: [...d.groups, { ...g, id: newId(), name: `${g.name}（副本）` }] };

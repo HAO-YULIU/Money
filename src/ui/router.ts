@@ -14,7 +14,12 @@ export function parseHash(hash: string): Route {
   if (path === '' || path === '/') return { name: 'home' };
   const share = path.match(/^\/share\/(.+)$/);
   if (share) return { name: 'share', data: share[1] };
-  const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
+  let parts: string[];
+  try {
+    parts = path.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    return { name: 'notFound' };
+  }
   if (parts[0] === 'group' && parts[1]) {
     const groupId = parts[1];
     if (parts.length === 2) return { name: 'group', groupId };

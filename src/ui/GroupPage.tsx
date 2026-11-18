@@ -70,6 +70,7 @@ function ExpenseList({ group, readOnly, name }: { group: Group; readOnly: boolea
                   <div className="expense-detail" data-testid={`detail-${e.id}`} onClick={(ev) => ev.stopPropagation()}>
                     {e.kind === 'expense' && (
                       <>
+                        <div className="line muted"><span>{name(e.payerId)} 付 {formatTWD(e.amount)}</span></div>
                         {detailLines(e).map((l) => (
                           <div key={l.memberId} className="line">
                             <span>{name(l.memberId)}{l.roundingBonus && <span className="muted small">（進位多收）</span>}</span>
